@@ -166,7 +166,9 @@ func (c *Client) CreateIssue(issue Issue) (*Issue, error) {
 		err = decoder.Decode(&r)
 	}
 	if err != nil {
-		return nil, err
+		var b []byte = make([]byte, 10000)
+		i, _ := res.Body.Read(b)
+		return nil, errors.New(err.Error() + ` ==> ` + string(b[:i]))
 	}
 	return &r.Issue, nil
 }
