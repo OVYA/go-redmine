@@ -10,8 +10,8 @@ type rolesResult struct {
 	Roles []IdName `json:"roles"`
 }
 
-func (c *client) Roles() ([]IdName, error) {
-	res, err := c.Get(c.endpoint + "/roles.json?key=" + c.apikey)
+func (c *Client) Roles() ([]IdName, error) {
+	res, err := c.Get(c.endpoint + "/roles.json?key=" + c.apikey + c.getPaginationClause())
 	if err != nil {
 		return nil, err
 	}

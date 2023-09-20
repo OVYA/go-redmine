@@ -6,18 +6,28 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/mattn/go-redmine"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mattn/go-redmine"
+	"github.com/mattn/go-shellwords"
 )
+
+const name = "godmine"
+
+const version = "0.0.3"
+
+var revision = "HEAD"
 
 type config struct {
 	Endpoint string `json:"endpoint"`
@@ -27,8 +37,11 @@ type config struct {
 	Insecure bool   `json:"insecure"`
 }
 
-var profile *string = flag.String("p", os.Getenv("GODMINE_ENV"), "profile")
-var conf config
+var (
+	conf         config
+	profile      = flag.String("p", os.Getenv("GODMINE_ENV"), "profile")
+	printVersion = flag.Bool("version", false, "print version")
+)
 
 func fatal(format string, err error) {
 	if err != nil {
@@ -74,14 +87,17 @@ func notesFromEditor(issue *redmine.Issue) (string, error) {
 		file = filepath.Join(os.Getenv("HOME"), ".config", "godmine", newf)
 	}
 	defer os.Remove(file)
-	editor := getEditor()
+	editor, err := getEditor()
+	if err != nil {
+		return "", err
+	}
 
 	body := "### Notes Here ###\n"
 	contents := issue.GetTitle() + "\n" + body
 
 	ioutil.WriteFile(file, []byte(contents), 0600)
 
-	if err := run([]string{editor, file}); err != nil {
+	if err := run(append(editor, file)); err != nil {
 		return "", err
 	}
 
@@ -106,7 +122,10 @@ func issueFromEditor(contents string) (*redmine.Issue, error) {
 		file = filepath.Join(os.Getenv("HOME"), ".config", "godmine", newf)
 	}
 	defer os.Remove(file)
-	editor := getEditor()
+	editor, err := getEditor()
+	if err != nil {
+		return nil, err
+	}
 
 	if contents == "" {
 		contents = "### Subject Here ###\n### Description Here ###\n"
@@ -114,7 +133,7 @@ func issueFromEditor(contents string) (*redmine.Issue, error) {
 
 	ioutil.WriteFile(file, []byte(contents), 0600)
 
-	if err := run([]string{editor, file}); err != nil {
+	if err := run(append(editor, file)); err != nil {
 		return nil, err
 	}
 
@@ -152,7 +171,10 @@ func projectFromEditor(contents string) (*redmine.Project, error) {
 		file = filepath.Join(os.Getenv("HOME"), ".config", "godmine", newf)
 	}
 	defer os.Remove(file)
-	editor := getEditor()
+	editor, err := getEditor()
+	if err != nil {
+		return nil, err
+	}
 
 	if contents == "" {
 		contents = "### Name Here ###\n### Identifier Here ###\n### Description Here ###\n"
@@ -160,7 +182,7 @@ func projectFromEditor(contents string) (*redmine.Project, error) {
 
 	ioutil.WriteFile(file, []byte(contents), 0600)
 
-	if err := run([]string{editor, file}); err != nil {
+	if err := run(append(editor, file)); err != nil {
 		return nil, err
 	}
 
@@ -195,7 +217,7 @@ func projectFromEditor(contents string) (*redmine.Project, error) {
 	return &project, nil
 }
 
-func getEditor() string {
+func getEditor() ([]string, error) {
 	editor := conf.Editor
 	if editor == "" {
 		editor = os.Getenv("EDITOR")
@@ -207,20 +229,10 @@ func getEditor() string {
 			}
 		}
 	}
-	return editor
+	return shellwords.Parse(editor)
 }
 func getConfig() config {
-	file := "settings.json"
-
-	if *profile != "" {
-		file = "settings." + *profile + ".json"
-	}
-
-	if runtime.GOOS == "windows" {
-		file = filepath.Join(os.Getenv("APPDATA"), "godmine", file)
-	} else {
-		file = filepath.Join(os.Getenv("HOME"), ".config", "godmine", file)
-	}
+	file := createConfigFileName()
 
 	b, err := ioutil.ReadFile(file)
 	if err != nil {
@@ -334,8 +346,8 @@ func showIssue(id int) {
 		fatal("Failed to show issue: %s\n", err)
 	}
 	assigned := ""
-	if issue.Assigned != nil {
-		assigned = issue.Assigned.Name
+	if issue.AssignedTo != nil {
+		assigned = issue.AssignedTo.Name
 	}
 
 	fmt.Printf(`
@@ -365,9 +377,9 @@ UpdatedOn: %s
 		issue.Description)
 }
 
-func listIssues() {
+func listIssues(filter *redmine.IssueFilter) {
 	c := redmine.NewClient(conf.Endpoint, conf.Apikey)
-	issues, err := c.Issues()
+	issues, err := c.IssuesByFilter(filter)
 	if err != nil {
 		fatal("Failed to list issues: %s\n", err)
 	}
@@ -576,6 +588,225 @@ func listNews() {
 	}
 }
 
+func showVersion(id int) {
+	c := redmine.NewClient(conf.Endpoint, conf.Apikey)
+	ver, err := c.Version(id)
+	if err != nil {
+		fatal("Failed to show version: %s\n", err)
+	}
+
+	fmt.Printf(`
+Id: %d
+Project: %s
+Name: %s
+Description: %s
+Status: %s
+DueDate: %s
+CreatedOn: %s
+`[1:],
+		ver.Id,
+		ver.Project.Name,
+		ver.Name,
+		ver.Description,
+		ver.Status,
+		ver.DueDate,
+		ver.CreatedOn)
+}
+
+func listVersions(projectId int) {
+	c := redmine.NewClient(conf.Endpoint, conf.Apikey)
+	versions, err := c.Versions(projectId)
+	if err != nil {
+		fatal("Failed to list versions: %s\n", err)
+	}
+	for _, i := range versions {
+		fmt.Printf("%4d: %s\n", i.Id, i.Name)
+	}
+}
+
+func showWikiPage(title string) {
+	c := redmine.NewClient(conf.Endpoint, conf.Apikey)
+	page, err := c.WikiPage(conf.Project, title)
+	if err != nil {
+		fatal("Failed to show user: %s\n", err)
+	}
+
+	fmt.Printf(`
+Title: %s
+Author: %s
+Version: %v
+CreatedOn: %s
+UpdatedOn: %s
+Comments: %s
+
+%s
+`[1:],
+		page.Title,
+		page.Author.Name,
+		page.Version,
+		page.CreatedOn,
+		page.UpdatedOn,
+		page.Comments,
+		page.Text)
+}
+
+func listWikiPages() {
+	c := redmine.NewClient(conf.Endpoint, conf.Apikey)
+	pages, err := c.WikiPages(conf.Project)
+	if err != nil {
+		fatal("Failed to list wiki pages: %s\n", err)
+	}
+	for _, page := range pages {
+		fmt.Printf("%s\n", page.Title)
+	}
+}
+
+func editWikiPage(title string) error {
+	c := redmine.NewClient(conf.Endpoint, conf.Apikey)
+	page, err := c.WikiPage(conf.Project, title)
+	if err != nil {
+		if err.Error() != "Not Found" {
+			return fmt.Errorf("Failed to read wiki page for editing: %s\n", err)
+		}
+		page = &redmine.WikiPage{Title: title}
+	}
+	file := ""
+	newf := fmt.Sprintf("%d.txt", rand.Int())
+	if runtime.GOOS == "windows" {
+		file = filepath.Join(os.Getenv("APPDATA"), "godmine", newf)
+	} else {
+		file = filepath.Join(os.Getenv("HOME"), ".config", "godmine", newf)
+	}
+	defer os.Remove(file)
+	editor, err := getEditor()
+	if err != nil {
+		return err
+	}
+
+	ioutil.WriteFile(file, []byte(page.Text), 0600)
+
+	if err = run(append(editor, file)); err != nil {
+		return err
+	}
+
+	b, err := ioutil.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	text := string(b)
+	if text == page.Text {
+		return nil
+	}
+	page.Text = text
+	if page.Version == nil {
+		if _, err := c.CreateWikiPage(conf.Project, *page); err != nil {
+			return err
+		}
+	} else {
+		if err := c.UpdateWikiPage(conf.Project, *page); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func initConfigFile(endpoint string, apikey string, project string) {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		fatal("endpoint must be a URL: %s\n", err)
+	} else if (u.Scheme != "http" && u.Scheme != "https") || len(u.Host) == 0 {
+		fatal("%s\n", errors.New("endpoint must be a URL"))
+	}
+	if m, _ := regexp.MatchString("^[[:alnum:]]+$", apikey); !m {
+		fatal("%s\n", errors.New("apikey must be [0-9a-f] only"))
+	}
+	projectId, err := strconv.Atoi(project)
+	if err != nil {
+		fatal("Project id can not convert to integer: %s\n", err)
+	}
+
+	filename := createConfigFileName()
+	dirname := filepath.Dir(filename)
+
+	if _, err := os.Open(dirname); os.IsNotExist(err) {
+		err := os.MkdirAll(dirname, 0700)
+		if err != nil {
+			fatal("Failed to create directory: %s\n", err)
+		}
+	}
+
+	c := config{}
+	c.Endpoint = endpoint
+	c.Apikey = apikey
+	c.Project = projectId
+
+	bytes, err := json.MarshalIndent(c, "", "\t")
+	if err != nil {
+		fatal("Failed to marshal configurations: %s\n", err)
+	}
+
+	ioutil.WriteFile(filename, bytes, 0600)
+}
+
+func listConfigFile() {
+	filename := createConfigFileName()
+	dirname := filepath.Dir(filename)
+
+	dir, err := os.Open(dirname)
+	if err != nil {
+		fatal("Failed to open directory: %s\n", err)
+	}
+
+	files, err := dir.Readdirnames(0)
+	if err != nil {
+		fatal("Failed to read directory: %s\n", err)
+	}
+
+	for _, file := range files {
+		fmt.Println(file)
+	}
+}
+
+func showConfigFile() {
+	file := createConfigFileName()
+
+	fmt.Println(file)
+
+	content, err := ioutil.ReadFile(file)
+	if err != nil {
+		fatal("Failed to read file: %s\n", err)
+	}
+
+	fmt.Println(string(content))
+}
+
+func editConfigFile() error {
+	file := createConfigFileName()
+
+	editor, err := getEditor()
+	if err != nil {
+		return err
+	}
+
+	return run(append(editor, file))
+}
+
+func createConfigFileName() string {
+	file := "settings.json"
+
+	if *profile != "" {
+		file = "settings." + *profile + ".json"
+	}
+
+	if runtime.GOOS == "windows" {
+		file = filepath.Join(os.Getenv("APPDATA"), "godmine", file)
+	} else {
+		file = filepath.Join(os.Getenv("HOME"), ".config", "godmine", file)
+	}
+
+	return file
+}
+
 func usage() {
 	fmt.Println(`godmine <command> <subcommand> [arguments]
 
@@ -636,16 +867,82 @@ User Commands:
 
   list     l listing users.
              $ godmine u l
-`)
+
+Version Commands:
+  show     s show given version.
+             $ godmine v s 1
+
+  list     s listing versions of given project.
+             $ godmine v l 1
+
+Wiki Commands:
+  show     s show wiki page griven by title.
+             $ godmine w s home
+
+  list     l listing project's wiki pages.
+             $ godmine w l
+
+  edit     e edit wiki page griven by title with editor
+             $ godmine w e home
+
+Config Commands:
+  init     i initialize configuration file.
+             $ godmine c i endpoint apikey project
+
+  edit     e edit configuration file with editor
+             $ godmine c e
+
+  list     l list configuration files
+             $ godmine c l
+
+  show     s show configuration file
+             $ godmine c s
+
+ENVIRONMENT VARIABLES
+
+  GODMINE_ENV
+    This variable use for switching configuration filename.
+    Default configuration filename is 'settings.json'.
+    If you set GODMINE_ENV to 'mine'
+    , godmine use 'settings.mine.json' to configuration filename.`)
 	os.Exit(1)
 }
 
 func main() {
-	rand.Seed(time.Now().UnixNano())
 	flag.Parse()
+
+	if *printVersion {
+		fmt.Printf("%s %s (rev: %s/%s)\n", name, version, revision, runtime.Version())
+		return
+	}
 	if flag.NArg() <= 1 {
 		usage()
 	}
+
+	rand.Seed(time.Now().UnixNano())
+
+	// config command parse before load config file.
+	switch flag.Arg(0) {
+	case "c", "config":
+		switch flag.Arg(1) {
+		case "e", "edit":
+			editConfigFile()
+			break
+		case "i", "init":
+			initConfigFile(flag.Arg(2), flag.Arg(3), flag.Arg(4))
+			break
+		case "l", "list":
+			listConfigFile()
+			break
+		case "s", "show":
+			showConfigFile()
+			break
+		default:
+			usage()
+		}
+		os.Exit(0)
+	}
+
 	conf = getConfig()
 	if conf.Insecure {
 		http.DefaultClient = &http.Client{
@@ -724,7 +1021,19 @@ func main() {
 			}
 			break
 		case "l", "list":
-			listIssues()
+			listIssues(nil)
+			break
+		case "p", "project":
+			filter := &redmine.IssueFilter{
+				ProjectId: fmt.Sprint(conf.Project),
+			}
+			listIssues(filter)
+			break
+		case "m", "mine":
+			filter := &redmine.IssueFilter{
+				AssignedToId: "me",
+			}
+			listIssues(filter)
 			break
 		default:
 			usage()
@@ -833,6 +1142,63 @@ func main() {
 			break
 		default:
 			usage()
+		}
+	case "v", "version":
+		switch flag.Arg(1) {
+		case "s", "show":
+			if flag.NArg() == 3 {
+				id, err := strconv.Atoi(flag.Arg(2))
+				if err != nil {
+					fatal("Invalid version id: %s\n", err)
+				}
+				showVersion(id)
+			} else {
+				usage()
+			}
+		case "l", "list":
+			if flag.NArg() == 3 {
+				projectId, err := strconv.Atoi(flag.Arg(2))
+				if err != nil {
+					fatal("Invalid project id: %s\n", err)
+				}
+				listVersions(projectId)
+			} else {
+				usage()
+			}
+		default:
+			usage()
+		}
+
+	case "w", "wiki":
+		switch flag.Arg(1) {
+		case "s", "show":
+			if flag.NArg() == 3 {
+				title := flag.Arg(2)
+				showWikiPage(title)
+			} else {
+				usage()
+			}
+			break
+		case "l", "list":
+			if flag.NArg() == 2 {
+				listWikiPages()
+			} else {
+				usage()
+			}
+			break
+		case "e", "edit":
+			if flag.NArg() == 3 {
+				title := flag.Arg(2)
+				if err := editWikiPage(title); err != nil {
+					fatal("Failed editing wiki page: %s\n", err)
+				}
+			} else {
+				usage()
+			}
+			break
+		default:
+			usage()
+
 		}
 	default:
 		usage()

@@ -16,8 +16,8 @@ type TimeEntryActivity struct {
 	IsDefault bool   `json:"is_default"`
 }
 
-func (c *client) TimeEntryActivites() ([]TimeEntryActivity, error) {
-	res, err := c.Get(c.endpoint + "/enumerations/time_entry_activities.json?key=" + c.apikey)
+func (c *Client) TimeEntryActivities() ([]TimeEntryActivity, error) {
+	res, err := c.Get(c.endpoint + "/enumerations/time_entry_activities.json?key=" + c.apikey + c.getPaginationClause())
 	if err != nil {
 		return nil, err
 	}

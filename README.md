@@ -2,6 +2,12 @@
 
 Intefaces to redmine.
 
+## Module Install
+
+```
+go get github.com/mattn/go-redmine 
+```
+
 ## APIs
 
 Provide Interfaces to redmine APIs.
@@ -15,8 +21,8 @@ Provide Interfaces to redmine APIs.
 |Time Entries       |      100%|
 |News               |      100%|
 |Issue Relations    |      100%|
-|Versions           |        0%|
-|Wiki Pages         |        0%|
+|Versions           |      100%|
+|Wiki Pages         |      100%|
 |Queries            |        0%|
 |Attachments        |        0%|
 |Issue Statuses     |      100%|
@@ -29,6 +35,12 @@ Provide Interfaces to redmine APIs.
 ## Godmine
 
 Provide command line tool for redmine.
+
+## Install
+
+```
+go install github.com/mattn/go-redmine/cmd/godmine@latest
+```
 
 ### Usage
 
@@ -98,3 +110,13 @@ Write following:
     	"project": 1 // default project id
     }
 
+If you want switching configuration file, you should use `GODMINE_ENV` environment variable.
+If you set `GODMINE_ENV` to *mine*, godmine use `settings.mine.json` to configuration file.
+
+# License
+
+MIT
+
+# Author
+
+Yasuhiro Matsumoto (a.k.a mattn)

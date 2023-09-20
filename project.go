@@ -21,15 +21,17 @@ type projectsResult struct {
 }
 
 type Project struct {
-	Id          int    `json:"id"`
-	Name        string `json:"name"`
-	Identifier  string `json:"identifier"`
-	Description string `json:"description"`
-	CreatedOn   string `json:created_on`
-	UpdatedOn   string `json:updated_on`
+	Id           int            `json:"id"`
+	Parent       IdName         `json:"parent"`
+	Name         string         `json:"name"`
+	Identifier   string         `json:"identifier"`
+	Description  string         `json:"description"`
+	CreatedOn    string         `json:"created_on"`
+	UpdatedOn    string         `json:"updated_on"`
+	CustomFields []*CustomField `json:"custom_fields,omitempty"`
 }
 
-func (c *client) Project(id int) (*Project, error) {
+func (c *Client) Project(id int) (*Project, error) {
 	res, err := c.Get(c.endpoint + "/projects/" + strconv.Itoa(id) + ".json?key=" + c.apikey)
 	if err != nil {
 		return nil, err
@@ -53,8 +55,8 @@ func (c *client) Project(id int) (*Project, error) {
 	return &r.Project, nil
 }
 
-func (c *client) Projects() ([]Project, error) {
-	res, err := c.Get(c.endpoint + "/projects.json?key=" + c.apikey)
+func (c *Client) Projects() ([]Project, error) {
+	res, err := c.Get(c.endpoint + "/projects.json?key=" + c.apikey + c.getPaginationClause())
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +79,7 @@ func (c *client) Projects() ([]Project, error) {
 	return r.Projects, nil
 }
 
-func (c *client) CreateProject(project Project) (*Project, error) {
+func (c *Client) CreateProject(project Project) (*Project, error) {
 	var ir projectRequest
 	ir.Project = project
 	s, err := json.Marshal(ir)
@@ -112,7 +114,7 @@ func (c *client) CreateProject(project Project) (*Project, error) {
 	return &r.Project, nil
 }
 
-func (c *client) UpdateProject(project Project) error {
+func (c *Client) UpdateProject(project Project) error {
 	var ir projectRequest
 	ir.Project = project
 	s, err := json.Marshal(ir)
@@ -125,14 +127,14 @@ func (c *client) UpdateProject(project Project) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	res, err := c.Do(req)
-	if res.StatusCode == 404 {
-		return errors.New("Not Found")
-	}
 	if err != nil {
 		return err
 	}
 	defer res.Body.Close()
 
+	if res.StatusCode == 404 {
+		return errors.New("Not Found")
+	}
 	if res.StatusCode != 200 {
 		decoder := json.NewDecoder(res.Body)
 		var er errorsResult
@@ -147,20 +149,21 @@ func (c *client) UpdateProject(project Project) error {
 	return err
 }
 
-func (c *client) DeleteProject(id int) error {
+func (c *Client) DeleteProject(id int) error {
 	req, err := http.NewRequest("DELETE", c.endpoint+"/projects/"+strconv.Itoa(id)+".json?key="+c.apikey, strings.NewReader(""))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	res, err := c.Do(req)
-	if res.StatusCode == 404 {
-		return errors.New("Not Found")
-	}
 	if err != nil {
 		return err
 	}
 	defer res.Body.Close()
+
+	if res.StatusCode == 404 {
+		return errors.New("Not Found")
+	}
 
 	decoder := json.NewDecoder(res.Body)
 	if res.StatusCode != 200 {
