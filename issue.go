@@ -70,22 +70,6 @@ type Issue struct {
 	DoneRatio      float32        `json:"done_ratio"`
 	EstimatedHours float32        `json:"estimated_hours"`
 	Journals       []*Journal     `json:"journals"`
-	Id             int            `json:"id"`
-	Subject        string         `json:"subject"`
-	Description    string         `json:"description"`
-	ProjectId      int            `json:"project_id"`
-	Project        *IdName        `json:"project"`
-	TrackerId      int            `json:"tracker_id"`
-	Tracker        *IdName        `json:"tracker"`
-	StatusId       int            `json:"status_id"`
-	Status         *IdName        `json:"status"`
-	Priority       *IdName        `json:"priority"`
-	Author         *IdName        `json:"author"`
-	Assigned       *IdName        `json:"assigned"`
-	Notes          string         `json:"notes"`
-	StatusDate     string         `json:"status_date"`
-	CreatedOn      string         `json:"created_on"`
-	UpdatedOn      string         `json:"updated_on"`
 }
 
 type IssueFilter struct {
